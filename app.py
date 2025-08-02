@@ -1,55 +1,68 @@
+
 import streamlit as st
 import pandas as pd
+import joblib
+from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-import seaborn as sns
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 
-st.title("🧠 Stress & Mood Stability Detector")
+# Load model and dataset
+model = joblib.load("stress_model.pkl")
+df = pd.read_csv("cleaned_stress_dataset.csv")
 
-# Load dataset
-@st.cache_data
-def load_data():
-    df = pd.read_csv("Stress Level Detection Based on Daily Activities.csv")
-    df["Social Support"].fillna(df["Social Support"].mode()[0], inplace=True)
-    return df
+# Encode target
+le = LabelEncoder()
+df['mood_stability'] = le.fit_transform(df['mood_stability'])
 
-df = load_data()
-st.write("### Dataset Preview", df.head())
+# Separate features and target
+X = df.drop('mood_stability', axis=1)
+y = df['mood_stability']
 
-# Preprocessing
-df_encoded = pd.get_dummies(df)
-X = df_encoded.drop(['Mood Stability_Stable', 'Mood Stability_Unstable'], axis=1)
-y = df_encoded['Mood Stability_Stable']
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-model = RandomForestClassifier(random_state=42)
-model.fit(X_train, y_train)
+# User Interface
+st.title("Stress & Mood Stability Predictor")
 
-# Evaluation
-y_pred = model.predict(X_test)
-st.write("### Model Accuracy", f"{accuracy_score(y_test, y_pred):.4f}")
-st.write("### Classification Report")
-st.text(classification_report(y_test, y_pred))
+menu = st.sidebar.radio("Choose Mode", ["🎯 Predict Mood", "📊 Model Evaluation"])
 
-# Confusion Matrix
-conf_matrix = confusion_matrix(y_test, y_pred)
-st.write("### Confusion Matrix")
-fig, ax = plt.subplots()
-sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', ax=ax,
-            xticklabels=["Unstable", "Stable"], yticklabels=["Unstable", "Stable"])
-st.pyplot(fig)
+if menu == "🎯 Predict Mood":
+    st.subheader("Enter Your Details")
 
-# User Input
-st.sidebar.header("📋 Enter Your Details")
-fields = ['Age', 'Gender', 'Work hours', 'Screen time', 'Sleep time', 'Exercise frequency',
-          'Mood Stability', 'Fatigue level', 'Headache', 'Work_life Balance', 'Social Support']
-user_data = {field: st.sidebar.text_input(field) for field in fields}
+    # Collect user inputs (adjust according to your dataset)
+    gender = st.selectbox("Gender", ["Male", "Female"])
+    age = st.slider("Age", 15, 80, 25)
+    sleep_time = st.slider("Sleep Time (hours)", 0, 12, 7)
+    screen_time = st.slider("Screen Time (hours)", 0, 15, 6)
+    work_hours = st.slider("Work/Study Hours", 0, 16, 8)
+    exercise = st.selectbox("Exercise Frequency", ["None", "Rarely", "Regularly"])
+    diet = st.selectbox("Diet Quality", ["Poor", "Average", "Good"])
 
-if st.sidebar.button("Predict"):
-    input_df = pd.DataFrame([user_data])
-    input_encoded = pd.get_dummies(input_df)
-    input_encoded = input_encoded.reindex(columns=X_train.columns, fill_value=0)
-    prediction = model.predict(input_encoded)[0]
-    mood_status = "Stable" if prediction == 1 else "Unstable"
-    st.success(f"🧠 Predicted Mood Stability: **{mood_status}**")
+    # Encode user inputs like in training
+    gender = 1 if gender == "Male" else 0
+    exercise_map = {"None": 0, "Rarely": 1, "Regularly": 2}
+    diet_map = {"Poor": 0, "Average": 1, "Good": 2}
+
+    user_data = [[gender, age, sleep_time, screen_time, work_hours, exercise_map[exercise], diet_map[diet]]]
+
+    if st.button("Predict"):
+        prediction = model.predict(user_data)
+        label = le.inverse_transform(prediction)[0]
+        st.success(f"✅ Predicted Mood Stability: **{label}**")
+
+elif menu == "📊 Model Evaluation":
+    st.subheader("Model Evaluation on Dataset")
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+
+    # Classification report
+    st.text("Classification Report:")
+    st.text(classification_report(y_test, y_pred, target_names=le.classes_))
+
+    # Confusion Matrix
+    cm = confusion_matrix(y_test, y_pred)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=le.classes_)
+    fig, ax = plt.subplots()
+    disp.plot(ax=ax, cmap='Blues')
+    st.pyplot(fig)
